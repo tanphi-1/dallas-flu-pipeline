@@ -1,0 +1,9 @@
+version: 2
+sources:
+  - name: staging
+    schema: staging
+    tables:
+      - name: stg_dchhs_weekly
+        description: Raw Dallas County lab data from DCHHS PDFs
+      - name: stg_dshs_weekly
+        description: Texas ILI, baseline, and age group data from DSHS PDFs

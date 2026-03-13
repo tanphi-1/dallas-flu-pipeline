@@ -1,0 +1,18 @@
+version: 2
+models:
+  - name: stg_dchhs_weekly
+    columns:
+      - name: report_week_end_date
+        tests: [not_null, unique]
+      - name: flu_season
+        tests:
+          - accepted_values:
+              values: ['2023-2024','2024-2025']
+      - name: pct_positive
+        tests: [not_null]
+  - name: stg_dshs_weekly
+    columns:
+      - name: report_week_end_date
+        tests: [not_null, unique]
+      - name: ili_baseline_pct
+        tests: [not_null]

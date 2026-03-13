@@ -1,0 +1,12 @@
+name: 'dallas_flu'
+version: '1.0.0'
+config-version: 2
+profile: 'dallas_flu'
+model-paths: ['models']
+test-paths: ['tests']
+target-path: 'target'
+models:
+  dallas_flu:
+    staging:      { +schema: staging,  +materialized: view  }
+    intermediate: { +schema: marts,    +materialized: view  }
+    marts:        { +schema: marts,    +materialized: table }

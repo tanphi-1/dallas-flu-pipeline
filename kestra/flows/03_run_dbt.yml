@@ -1,0 +1,24 @@
+id: run_dbt
+namespace: dallas.flu
+description: Run dbt models and tests to build mart tables
+
+triggers:
+  - id: after_load
+    type: io.kestra.plugin.core.trigger.Flow
+    conditions:
+      - type: io.kestra.plugin.core.condition.ExecutionStatusCondition
+        in: [SUCCESS]
+    flows:
+      - namespace: dallas.flu
+        flowId: parse_and_load
+
+tasks:
+  - id: dbt_run
+    type: io.kestra.plugin.scripts.shell.Commands
+    commands:
+      - cd /app/dbt && dbt run --profiles-dir . --project-dir .
+
+  - id: dbt_test
+    type: io.kestra.plugin.scripts.shell.Commands
+    commands:
+      - cd /app/dbt && dbt test --profiles-dir . --project-dir .

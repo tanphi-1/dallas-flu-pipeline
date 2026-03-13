@@ -1,0 +1,4 @@
+supabase_access_token = "sbp_your_access_token"
+supabase_project_ref  = "your_project_ref_id"
+supabase_db_password  = "your_database_password"
+supabase_db_url       = "postgresql://postgres:PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres"
