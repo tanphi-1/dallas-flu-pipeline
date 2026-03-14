@@ -6,11 +6,11 @@ triggers:
   - id: after_scrape
     type: io.kestra.plugin.core.trigger.Flow
     conditions:
+      - type: io.kestra.plugin.core.condition.ExecutionFlowCondition
+        namespace: dallas.flu
+        flowId: scrape_all_pdfs
       - type: io.kestra.plugin.core.condition.ExecutionStatusCondition
         in: [SUCCESS]
-    flows:
-      - namespace: dallas.flu
-        flowId: scrape_all_pdfs
 
 tasks:
   - id: parse_dchhs
@@ -19,7 +19,7 @@ tasks:
       SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
       SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
     beforeCommands:
-      - pip install pdfplumber pandas supabase python-dotenv -q
+      - pip install pdfplumber pandas supabase -q
     outputFiles: ['dchhs_weekly.csv']
     script: |
       import os, io, re, json
@@ -28,18 +28,66 @@ tasks:
       from supabase import create_client
 
       supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-      BUCKET   = 'flu-pdfs-dchhs'
+      BUCKET = 'flu-pdfs-dchhs'
+      TARGET_SEASONS = {'2023-2024', '2024-2025'}
 
       def safe_float(val):
+          if val is None: return None
           try: return float(str(val).replace('%','').replace(',','').strip())
           except: return None
 
       def safe_int(val):
-          try: return int(str(val).replace(',','').strip())
+          if val is None: return None
+          try: return int(float(str(val).replace(',','').strip()))
           except: return None
 
       def derive_season(date):
           return f'{date.year}-{date.year+1}' if date.month >= 10 else f'{date.year-1}-{date.year}'
+
+      def find_table(tables, marker):
+          for tbl in tables:
+              for row in tbl:
+                  for cell in row:
+                      if cell and marker.lower() in str(cell).lower():
+                          return tbl
+          return None
+
+      def row_label(row):
+          for cell in row[:3]:
+              if cell and str(cell).strip():
+                  return str(cell).strip().lower()
+          return ''
+
+      def get_current_week_val(row, is_pct=False):
+          nums = []
+          for i, cell in enumerate(row):
+              if cell is None: continue
+              s = str(cell).strip().replace('*', '')
+              if not s: continue
+              clean = s.replace(',', '').replace('%', '')
+              if re.match(r'^-?\d+\.?\d*$', clean):
+                  nums.append(s)
+          if not nums: return None
+          if is_pct or len(nums) == 1:
+              return nums[-1]
+          return nums[-2] if len(nums) >= 2 else nums[-1]
+
+      def parse_date(text):
+          m = re.search(r'ending[:\s]+(\w+ \d{1,2},?\s*\d{4})', text, re.IGNORECASE)
+          if m:
+              ds = m.group(1).replace(',', '')
+              for fmt in ('%B %d %Y', '%b %d %Y'):
+                  try: return datetime.strptime(ds.strip(), fmt).date()
+                  except: pass
+          m = re.search(r'ending[:\s]+([\d]{1,2}/[\d]{1,2}/[\d]{4})', text, re.IGNORECASE)
+          if m:
+              try: return datetime.strptime(m.group(1).strip(), '%m/%d/%Y').date()
+              except: pass
+          m = re.search(r'Ending[_-]?(\d{1,2})[.\-](\d{1,2})[.\-](\d{4})', text, re.IGNORECASE)
+          if m:
+              try: return datetime.strptime(f'{m.group(1)}/{m.group(2)}/{m.group(3)}', '%m/%d/%Y').date()
+              except: pass
+          return None
 
       def extract_record(filename, pdf_bytes):
           errors = []
@@ -49,53 +97,70 @@ tasks:
               tables = []
               for page in pdf.pages: tables.extend(page.extract_tables())
 
-              m = re.search(r'[Ww]eek [Ee]nding[:\s]+([\d/]+)', text)
-              if m:
-                  try:
-                      rec['report_week_end_date'] = datetime.strptime(
-                          m.group(1).strip(), '%m/%d/%Y').date()
-                  except: errors.append(f'Date parse failed: {m.group(1)}')
-              else: errors.append('Week ending date not found')
+              rec['report_week_end_date'] = parse_date(text)
+              if not rec['report_week_end_date']:
+                  rec['report_week_end_date'] = parse_date(filename)
+              if not rec['report_week_end_date']:
+                  errors.append('Week ending date not found')
 
-              m2 = re.search(r'CDC [Ww]eek\s+(\d+)', text)
+              m2 = re.search(r'[Ww]eek\s+(\d+)\s+ending', text, re.IGNORECASE)
+              if not m2:
+                  m2 = re.search(r'[Ww]eek[- ](\d+)[- ]Ending', filename, re.IGNORECASE)
               rec['mmwr_week'] = int(m2.group(1)) if m2 else None
 
-              try:
-                  t1 = tables[0]
-                  rec['total_tests_performed'] = safe_int(t1[8][6])
-                  rec['total_positive_tests']  = safe_int(t1[9][6])
-                  rec['pct_positive']          = safe_float(t1[10][6])
-                  rec['flu_a_count']           = safe_int(t1[11][6])
-                  rec['flu_b_count']           = safe_int(t1[12][6])
-              except (IndexError, TypeError) as e:
-                  errors.append(f'Table1 parse error: {e}')
+              lab = find_table(tables, 'Total Influenza Tests Performed')
+              if lab:
+                  try:
+                      for row in lab:
+                          label = row_label(row)
+                          if 'total influenza tests performed' in label:
+                              rec['total_tests_performed'] = safe_int(get_current_week_val(row))
+                          elif 'total positive influenza' in label:
+                              rec['total_positive_tests'] = safe_int(get_current_week_val(row))
+                          elif 'percent positive influenza' in label:
+                              rec['pct_positive'] = safe_float(get_current_week_val(row, is_pct=True))
+                          elif 'positive influenza a' in label:
+                              rec['flu_a_count'] = safe_int(get_current_week_val(row))
+                          elif 'positive influenza b' in label:
+                              rec['flu_b_count'] = safe_int(get_current_week_val(row))
+                  except Exception as e:
+                      errors.append(f'Lab table parse error: {e}')
 
-              try:
-                  t2 = tables[1]
-                  rec['flu_hospitalizations'] = safe_int(t2[1][6])
-                  rec['icu_admissions']       = safe_int(t2[2][6])
-                  rec['pediatric_deaths']     = safe_int(t2[3][6])
-              except (IndexError, TypeError) as e:
-                  errors.append(f'Table2 parse error: {e}')
+              hosp = find_table(tables, 'Influenza hospitalizations')
+              if hosp:
+                  try:
+                      for row in hosp:
+                          label = row_label(row)
+                          if 'influenza hospitalizations' in label:
+                              rec['flu_hospitalizations'] = safe_int(get_current_week_val(row))
+                          elif 'icu admissions' in label:
+                              rec['icu_admissions'] = safe_int(get_current_week_val(row))
+                          elif 'pediatric deaths' in label:
+                              rec['pediatric_deaths'] = safe_int(get_current_week_val(row))
+                  except Exception as e:
+                      errors.append(f'Hospitalization table parse error: {e}')
 
               absent = re.search(
                   r'school absenteeism rate was ([\d.]+)%.*?([\d.]+)%.*?influenza',
                   text, re.IGNORECASE | re.DOTALL)
               if absent:
                   rec['school_absenteeism_pct'] = safe_float(absent.group(1))
-                  rec['school_ili_pct']         = safe_float(absent.group(2))
+                  rec['school_ili_pct'] = safe_float(absent.group(2))
 
           if rec.get('report_week_end_date'):
               rec['flu_season'] = derive_season(rec['report_week_end_date'])
           return rec, errors
 
       pdfs = [f['name'] for f in supabase.storage.from_(BUCKET).list()]
-      records, all_errors = [], {}
+      records = []
       for filename in sorted(pdfs):
           print(f'Parsing: {filename}')
           pdf_bytes = supabase.storage.from_(BUCKET).download(filename)
           rec, errors = extract_record(filename, pdf_bytes)
-          if errors: all_errors[filename] = errors
+          if not rec.get('report_week_end_date'):
+              print(f'  SKIPPED (no date): {filename}'); continue
+          if rec.get('flu_season') not in TARGET_SEASONS:
+              print(f'  SKIPPED (season {rec.get("flu_season")}): {filename}'); continue
           records.append(rec)
       pd.DataFrame(records).to_csv('dchhs_weekly.csv', index=False)
       print(f'Saved {len(records)} DCHHS rows.')
@@ -106,27 +171,50 @@ tasks:
       SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
       SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
     beforeCommands:
-      - pip install pdfplumber pandas supabase python-dotenv -q
+      - pip install pdfplumber pandas supabase -q
     outputFiles: ['dshs_weekly.csv']
     script: |
       import os, io, re, json
       import pdfplumber, pandas as pd
-      from datetime import datetime
+      from datetime import datetime, date, timedelta
       from supabase import create_client
 
       supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
-      BUCKET   = 'flu-pdfs-dshs'
+      BUCKET = 'flu-pdfs-dshs'
+      TARGET_SEASONS = {'2023-2024', '2024-2025'}
 
       def safe_float(val):
+          if val is None: return None
           try: return float(str(val).replace('%','').replace(',','').strip())
           except: return None
 
       def safe_int(val):
-          try: return int(str(val).replace(',','').strip())
+          if val is None: return None
+          try: return int(float(str(val).replace(',','').strip()))
           except: return None
 
-      def derive_season(date):
-          return f'{date.year}-{date.year+1}' if date.month >= 10 else f'{date.year-1}-{date.year}'
+      def extract_number(s):
+          if s is None: return None
+          m = re.match(r'([\d,]+)', str(s).strip())
+          return safe_int(m.group(1)) if m else None
+
+      def derive_season(d):
+          return f'{d.year}-{d.year+1}' if d.month >= 10 else f'{d.year-1}-{d.year}'
+
+      def mmwr_week_to_date(year, week):
+          jan4 = date(year, 1, 4)
+          dow = jan4.isoweekday() % 7
+          week1_start = jan4 - timedelta(days=dow)
+          week_start = week1_start + timedelta(weeks=week - 1)
+          return week_start + timedelta(days=6)
+
+      def find_table(tables, marker):
+          for tbl in tables:
+              for row in tbl:
+                  for cell in row:
+                      if cell and marker.lower() in str(cell).lower():
+                          return tbl
+          return None
 
       def extract_record(filename, pdf_bytes):
           errors = []
@@ -140,57 +228,118 @@ tasks:
               if fn_match:
                   rec['mmwr_week'] = int(fn_match.group(2))
 
-              try:
-                  t4 = tables[3]
-                  rec['providers_reporting'] = safe_int(t4[1][1])
-                  rec['ili_pct']             = safe_float(t4[4][1])
-                  rec['ili_baseline_pct']    = safe_float(t4[5][1])
-                  if rec['ili_pct'] and rec['ili_baseline_pct']:
-                      rec['above_baseline'] = rec['ili_pct'] > rec['ili_baseline_pct']
-              except (IndexError, TypeError) as e:
-                  errors.append(f'Table4 ILINet error: {e}')
-
-              try:
-                  t5 = tables[4]
-                  last_row = t5[-1]
-                  rec['age_0_4_ili']          = safe_int(last_row[1])
-                  rec['age_5_24_ili']         = safe_int(last_row[2])
-                  rec['age_25_49_ili']        = safe_int(last_row[3])
-                  rec['age_50_64_ili']        = safe_int(last_row[4])
-                  rec['age_65_plus_ili']      = safe_int(last_row[5])
-                  rec['total_ili_cases']      = safe_int(last_row[6])
-                  rec['total_patient_visits'] = safe_int(last_row[7])
-              except (IndexError, TypeError) as e:
-                  errors.append(f'Table5 age group error: {e}')
-
-              try:
-                  t2 = tables[1]
-                  rec['flu_a_count'] = safe_int(t2[1][1])
-                  rec['flu_b_count'] = safe_int(t2[5][1])
-                  rec['h1n1_count']  = safe_int(t2[3][1])
-                  rec['h3n2_count']  = safe_int(t2[4][1])
-              except (IndexError, TypeError) as e:
-                  errors.append(f'Table2 lab error: {e}')
-
-              m = re.search(r'[Ww]eek [Ee]nding[:\s]+([\d/]+)', text)
-              if m:
+              flu_tbl = None
+              for tbl in tables:
+                  if tbl and tbl[0] and tbl[0][0] and 'influenza a' == str(tbl[0][0]).strip().lower():
+                      flu_tbl = tbl
+                      break
+              if flu_tbl:
                   try:
-                      rec['report_week_end_date'] = datetime.strptime(
-                          m.group(1).strip(), '%m/%d/%Y').date()
-                  except:
-                      errors.append(f'Date parse failed: {m.group(1)}')
+                      for row in flu_tbl:
+                          label = str(row[0] or '').strip().lower()
+                          if label == 'influenza a':
+                              rec['flu_a_count'] = extract_number(row[1])
+                          elif label == 'influenza b':
+                              rec['flu_b_count'] = extract_number(row[1])
+                          elif 'h1n1' in label:
+                              rec['h1n1_count'] = extract_number(row[1])
+                          elif 'h3n2' in label:
+                              rec['h3n2_count'] = extract_number(row[1])
+                  except Exception as e:
+                      errors.append(f'Flu type table error: {e}')
+
+              ili_tbl = find_table(tables, 'ILINet baseline')
+              if ili_tbl:
+                  try:
+                      for row in ili_tbl:
+                          label = str(row[0] or '').lower()
+                          if 'baseline' in label:
+                              for cell in row[1:]:
+                                  v = safe_float(cell)
+                                  if v is not None:
+                                      rec['ili_baseline_pct'] = v
+                                      break
+                              if rec.get('ili_baseline_pct') is None:
+                                  bm = re.search(r'baseline[^:]*?:\s*([\d.]+)%', text, re.IGNORECASE)
+                                  if not bm:
+                                      bm = re.search(r'baseline[^,]*,\s*\d{4}-\d{4}\s*\n?\s*([\d.]+)%', text, re.IGNORECASE)
+                                  if bm:
+                                      rec['ili_baseline_pct'] = safe_float(bm.group(1))
+                          elif 'percentage' in label and 'ili' in label:
+                              for cell in row[1:]:
+                                  v = safe_float(cell)
+                                  if v is not None:
+                                      rec['ili_pct'] = v
+                                      break
+                          elif 'providers reporting' in label and 'patient' not in label:
+                              for cell in row[1:]:
+                                  v = safe_int(cell)
+                                  if v is not None:
+                                      rec['providers_reporting'] = v
+                                      break
+                  except Exception as e:
+                      errors.append(f'ILINet table error: {e}')
+
+              age_tbl = find_table(tables, 'Total ILI')
+              if not age_tbl:
+                  age_tbl = find_table(tables, 'Number of ILI Cases')
+              if age_tbl:
+                  try:
+                      last_row = age_tbl[-1]
+                      nums = []
+                      for cell in last_row:
+                          if cell is not None and str(cell).strip():
+                              nums.append(str(cell).strip())
+                      if len(nums) >= 10:
+                          rec['providers_reporting'] = rec.get('providers_reporting') or safe_int(nums[1])
+                          rec['age_0_4_ili'] = safe_int(nums[2])
+                          rec['age_5_24_ili'] = safe_int(nums[3])
+                          rec['age_25_49_ili'] = safe_int(nums[4])
+                          rec['age_50_64_ili'] = safe_int(nums[5])
+                          rec['age_65_plus_ili'] = safe_int(nums[6])
+                          rec['total_ili_cases'] = safe_int(nums[7])
+                          rec['total_patient_visits'] = safe_int(nums[8])
+                          ili_from_table = safe_float(nums[9])
+                          if ili_from_table is not None:
+                              rec['ili_pct'] = rec.get('ili_pct') or ili_from_table
+                  except Exception as e:
+                      errors.append(f'Age group table error: {e}')
+
+              if rec.get('ili_pct') is not None and rec.get('ili_baseline_pct') is not None:
+                  rec['above_baseline'] = rec['ili_pct'] > rec['ili_baseline_pct']
+
+              if fn_match:
+                  year = int(fn_match.group(1))
+                  week = int(fn_match.group(2))
+                  rec['report_week_end_date'] = mmwr_week_to_date(year, week)
+              else:
+                  m = re.search(r'[Ww]eek [Ee]nding[:\s]+([\d/]+)', text)
+                  if m:
+                      try:
+                          rec['report_week_end_date'] = datetime.strptime(
+                              m.group(1).strip(), '%m/%d/%Y').date()
+                      except: pass
+                  if not rec.get('report_week_end_date'):
+                      m = re.search(r'[Ww]eek [Ee]nding:?\s*\n?\s*(\w+ \d{1,2},?\s*\d{4})', text)
+                      if m:
+                          ds = m.group(1).replace(',', '')
+                          try: rec['report_week_end_date'] = datetime.strptime(ds.strip(), '%B %d %Y').date()
+                          except: pass
 
           if rec.get('report_week_end_date'):
               rec['flu_season'] = derive_season(rec['report_week_end_date'])
           return rec, errors
 
       pdfs = [f['name'] for f in supabase.storage.from_(BUCKET).list()]
-      records, all_errors = [], {}
+      records = []
       for filename in sorted(pdfs):
           print(f'Parsing: {filename}')
           pdf_bytes = supabase.storage.from_(BUCKET).download(filename)
           rec, errors = extract_record(filename, pdf_bytes)
-          if errors: all_errors[filename] = errors
+          if not rec.get('report_week_end_date'):
+              print(f'  SKIPPED (no date): {filename}'); continue
+          if rec.get('flu_season') not in TARGET_SEASONS:
+              print(f'  SKIPPED (season {rec.get("flu_season")}): {filename}'); continue
           records.append(rec)
       pd.DataFrame(records).to_csv('dshs_weekly.csv', index=False)
       print(f'Saved {len(records)} DSHS rows.')
@@ -201,7 +350,7 @@ tasks:
       SUPABASE_DB_URL: '{{ secret("SUPABASE_DB_URL") }}'
     inputFiles:
       dchhs_weekly.csv: '{{ outputs.parse_dchhs.outputFiles["dchhs_weekly.csv"] }}'
-      dshs_weekly.csv:  '{{ outputs.parse_dshs.outputFiles["dshs_weekly.csv"] }}'
+      dshs_weekly.csv: '{{ outputs.parse_dshs.outputFiles["dshs_weekly.csv"] }}'
     beforeCommands:
       - pip install pandas psycopg2-binary -q
     script: |
@@ -225,9 +374,16 @@ tasks:
           'flu_a_count','flu_b_count','h1n1_count','h3n2_count','source_pdf_filename'
       ]
 
+      def to_python(val):
+          if val is None or (isinstance(val, float) and pd.isna(val)):
+              return None
+          if hasattr(val, 'item'):
+              return val.item()
+          return val
+
       def upsert(conn, table, cols, df):
           df = df[[c for c in cols if c in df.columns]].where(pd.notna(df), None)
-          rows = [tuple(row[c] if c in row else None for c in cols) for _, row in df.iterrows()]
+          rows = [tuple(to_python(row.get(c)) for c in cols) for _, row in df.iterrows()]
           sql = f'''
               INSERT INTO {table} ({', '.join(cols)})
               VALUES %s

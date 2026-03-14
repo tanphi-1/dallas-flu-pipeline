@@ -21,6 +21,10 @@ variable "supabase_db_url" {
   sensitive = true
 }
 
+variable "supabase_db_host" {
+  type = string
+}
+
 variable "kestra_image" {
   type    = string
   default = "kestra/kestra:latest-full"

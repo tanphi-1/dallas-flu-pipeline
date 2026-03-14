@@ -107,6 +107,7 @@ resource "docker_container" "kestra" {
   name    = "kestra"
   image   = docker_image.kestra.image_id
   restart = "unless-stopped"
+  command = ["server", "local"]
   ports {
     internal = 8080
     external = 8080
@@ -115,4 +116,12 @@ resource "docker_container" "kestra" {
     host_path      = "/tmp/kestra-data"
     container_path = "/app/storage"
   }
+  env = [
+    "SECRET_SUPABASE_URL=${var.supabase_url}",
+    "SECRET_SUPABASE_KEY=${var.supabase_key}",
+    "SECRET_SUPABASE_DB_URL=${var.supabase_db_url}",
+    "SECRET_SUPABASE_DB_HOST=${var.supabase_db_host}",
+    "SECRET_SUPABASE_DB_PASSWORD=${var.supabase_db_password}",
+    "SECRET_SUPABASE_PROJECT_REF=${var.supabase_project_ref}",
+  ]
 }
