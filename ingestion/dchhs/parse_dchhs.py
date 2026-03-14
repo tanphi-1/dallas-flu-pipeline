@@ -22,14 +22,24 @@ def derive_season(date):
     return f'{date.year}-{date.year+1}' if date.month >= 10 else f'{date.year-1}-{date.year}'
 
 def debug_pdf(filename):
-    '''Print all table contents — run this first on several PDFs.'''
+    '''Print all tables with flat indices, row indices, and column indices.'''
     pdf_bytes = supabase.storage.from_(BUCKET).download(filename)
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        flat_idx = 0
         for i, page in enumerate(pdf.pages):
             print(f'\n=== PAGE {i+1} ===')
-            for j, tbl in enumerate(page.extract_tables()):
-                print(f'  -- Table {j+1} --')
-                for row in tbl: print('   ', row)
+            tables = page.extract_tables()
+            if not tables:
+                print('  (no tables)')
+            for j, tbl in enumerate(tables):
+                num_cols = max(len(r) for r in tbl) if tbl else 0
+                print(f'\n  -- tables[{flat_idx}]  (page {i+1}, table {j+1})  '
+                      f'rows={len(tbl)}, cols={num_cols} --')
+                for r_idx, row in enumerate(tbl):
+                    cells = [f'[{c_idx}]={repr(cell)}' for c_idx, cell in enumerate(row)]
+                    print(f'    row[{r_idx}]: {", ".join(cells)}')
+                flat_idx += 1
+        print(f'\n  Total tables (flat): {flat_idx}')
 
 def extract_record(filename, pdf_bytes):
     errors = []

@@ -21,14 +21,35 @@ def safe_int(val):
 def derive_season(date):
     return f'{date.year}-{date.year+1}' if date.month >= 10 else f'{date.year-1}-{date.year}'
 
+def mmwr_week_to_date(year, week):
+    '''Compute the Saturday (week-ending date) for a given MMWR week.
+    MMWR Week 1 starts on the first Sunday on or before January 4.'''
+    from datetime import date, timedelta
+    jan4 = date(year, 1, 4)
+    # Sunday = 6 in isoweekday(), but we need day-of-week where Sunday=0
+    dow = jan4.isoweekday() % 7  # 0=Sun, 1=Mon, ..., 6=Sat
+    week1_start = jan4 - timedelta(days=dow)  # Sunday of MMWR week 1
+    week_start = week1_start + timedelta(weeks=week - 1)
+    return week_start + timedelta(days=6)  # Saturday = week ending date
+
 def debug_pdf(filename):
     pdf_bytes = supabase.storage.from_(BUCKET).download(filename)
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        flat_idx = 0
         for i, page in enumerate(pdf.pages):
             print(f'\n=== PAGE {i+1} ===')
-            for j, tbl in enumerate(page.extract_tables()):
-                print(f'  -- Table {j+1} --')
-                for row in tbl: print('   ', row)
+            tables = page.extract_tables()
+            if not tables:
+                print('  (no tables)')
+            for j, tbl in enumerate(tables):
+                num_cols = max(len(r) for r in tbl) if tbl else 0
+                print(f'\n  -- tables[{flat_idx}]  (page {i+1}, table {j+1})  '
+                      f'rows={len(tbl)}, cols={num_cols} --')
+                for r_idx, row in enumerate(tbl):
+                    cells = [f'[{c_idx}]={repr(cell)}' for c_idx, cell in enumerate(row)]
+                    print(f'    row[{r_idx}]: {", ".join(cells)}')
+                flat_idx += 1
+        print(f'\n  Total tables (flat): {flat_idx}')
 
 def extract_record(filename, pdf_bytes):
     errors = []
@@ -93,8 +114,17 @@ def extract_record(filename, pdf_bytes):
             except:
                 errors.append(f'Date parse failed: {m.group(1)}')
 
+        # Fallback: compute date from MMWR week + year in filename
+        if not rec.get('report_week_end_date') and fn_match:
+            year = int(fn_match.group(1))
+            week = int(fn_match.group(2))
+            rec['report_week_end_date'] = mmwr_week_to_date(year, week)
+            errors.append(f'Used MMWR fallback date: {rec["report_week_end_date"]}')
+
     if rec.get('report_week_end_date'):
         rec['flu_season'] = derive_season(rec['report_week_end_date'])
+    else:
+        errors.append('SKIPPED: no report_week_end_date could be determined')
     return rec, errors
 
 def main(debug_file=None):
@@ -107,6 +137,9 @@ def main(debug_file=None):
         pdf_bytes = supabase.storage.from_(BUCKET).download(filename)
         rec, errors = extract_record(filename, pdf_bytes)
         if errors: all_errors[filename] = errors
+        if not rec.get('report_week_end_date'):
+            print(f'  SKIPPED (no date): {filename}')
+            continue
         records.append(rec)
     os.makedirs('data/processed', exist_ok=True)
     pd.DataFrame(records).to_csv(OUTPUT, index=False)
