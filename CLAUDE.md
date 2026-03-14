@@ -248,7 +248,7 @@ dallas-flu-pipeline/
 - [x] Cloud + IaC — Codespaces + Terraform (terraform apply provisions buckets, tables, Kestra)
 - [x] Batch orchestration — Kestra 3-flow DAG deployed, secrets injected, chain triggers set
 - [x] Data warehouse — Supabase PostgreSQL, composite indexes, 59+90 rows loaded
-- [ ] Transformations — dbt 5 models, schema tests + 2 custom SQL tests, docs screenshot
+- [x] Transformations — dbt 5 models (2 staging + 1 intermediate + 2 marts), 9 tests passed, docs generated
 - [ ] Dashboard — Power BI 4 charts (mix of temporal + categorical)
 - [ ] Reproducibility — README step-by-step, .env.example committed, scripts run in order
 - [ ] Peer reviews — review 3 classmates (+3 pts each = +9 bonus)
@@ -280,8 +280,16 @@ dallas-flu-pipeline/
   - Container running with `server local` command
   - 3 flows deployed: scrape → parse+load → dbt (chained via ExecutionFlowCondition)
   - 6 secrets injected as SECRET_* env vars
-  - Not yet end-to-end tested (depends on dbt models in Phase 6)
-- [ ] dbt models written and tested
+  - Not yet end-to-end tested (Flow 03 now has working dbt models to run against)
+- [x] dbt models written and tested
+  - dbt-core 1.11.7 + dbt-postgres 1.10.0
+  - Connection via session pooler verified (dbt debug passed)
+  - Staging: 2 views (stg_dchhs_weekly, stg_dshs_weekly) — clean/filter source tables
+  - Intermediate: 1 view (int_flu_weekly_combined) — LEFT JOIN + window functions
+  - Marts: 2 tables (mart_flu_weekly: 59 rows, mart_flu_seasonal_summary: 2 rows)
+  - Tests: 9/9 passed (7 schema: not_null, unique, accepted_values + 2 custom SQL: pct_in_range, no_future_dates)
+  - Docs generated at dbt/target/ — screenshot pending for README
+  - dbt creates schemas marts_staging and marts_marts (standard custom schema behavior)
 - [ ] Power BI dashboard built
 - [ ] README written
 
