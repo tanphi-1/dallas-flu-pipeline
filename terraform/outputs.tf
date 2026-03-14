@@ -1,3 +1,3 @@
-output "dchhs_bucket" { value = supabase_storage_bucket.dchhs_pdfs.name }
-output "dshs_bucket"  { value = supabase_storage_bucket.dshs_pdfs.name }
+output "dchhs_bucket" { value = "flu-pdfs-dchhs" }
+output "dshs_bucket"  { value = "flu-pdfs-dshs" }
 output "kestra_ui"    { value = "http://localhost:8080" }

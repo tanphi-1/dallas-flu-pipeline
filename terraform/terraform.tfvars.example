@@ -1,4 +1,5 @@
-supabase_access_token = "sbp_your_access_token"
+supabase_url          = "https://YOUR_PROJECT_REF.supabase.co"
+supabase_key          = "your_service_role_key"
 supabase_project_ref  = "your_project_ref_id"
 supabase_db_password  = "your_database_password"
-supabase_db_url       = "postgresql://postgres:PASSWORD@db.PROJECT_REF.supabase.co:5432/postgres"
+supabase_db_url       = "postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres"
