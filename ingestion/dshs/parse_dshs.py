@@ -172,27 +172,26 @@ def extract_record(filename, pdf_bytes):
             rec['above_baseline'] = rec['ili_pct'] > rec['ili_baseline_pct']
 
         # --- Date extraction ---
-        # Try regex on text: "Week Ending January 20, 2024" or "Week Ending: 01/20/2024"
-        m = re.search(r'[Ww]eek [Ee]nding[:\s]+([\d/]+)', text)
-        if m:
-            try:
-                rec['report_week_end_date'] = datetime.strptime(
-                    m.group(1).strip(), '%m/%d/%Y').date()
-            except:
-                pass
-        # Try "Week Ending\nMonth DD, YYYY" from table text
-        if not rec.get('report_week_end_date'):
-            m = re.search(r'[Ww]eek [Ee]nding:?\s*\n?\s*(\w+ \d{1,2},?\s*\d{4})', text)
-            if m:
-                ds = m.group(1).replace(',', '')
-                try: rec['report_week_end_date'] = datetime.strptime(ds.strip(), '%B %d %Y').date()
-                except: pass
-        # Fallback: compute from MMWR week + year in filename
-        if not rec.get('report_week_end_date') and fn_match:
+        # Primary: compute from MMWR week + year in filename (most reliable)
+        if fn_match:
             year = int(fn_match.group(1))
             week = int(fn_match.group(2))
             rec['report_week_end_date'] = mmwr_week_to_date(year, week)
-            errors.append(f'Used MMWR fallback date: {rec["report_week_end_date"]}')
+        else:
+            # Fallback: regex on text
+            m = re.search(r'[Ww]eek [Ee]nding[:\s]+([\d/]+)', text)
+            if m:
+                try:
+                    rec['report_week_end_date'] = datetime.strptime(
+                        m.group(1).strip(), '%m/%d/%Y').date()
+                except:
+                    pass
+            if not rec.get('report_week_end_date'):
+                m = re.search(r'[Ww]eek [Ee]nding:?\s*\n?\s*(\w+ \d{1,2},?\s*\d{4})', text)
+                if m:
+                    ds = m.group(1).replace(',', '')
+                    try: rec['report_week_end_date'] = datetime.strptime(ds.strip(), '%B %d %Y').date()
+                    except: pass
 
     if rec.get('report_week_end_date'):
         rec['flu_season'] = derive_season(rec['report_week_end_date'])

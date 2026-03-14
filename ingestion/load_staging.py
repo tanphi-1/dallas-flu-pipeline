@@ -21,9 +21,17 @@ DSHS_COLS = [
     'flu_a_count','flu_b_count','h1n1_count','h3n2_count','source_pdf_filename'
 ]
 
+def to_python(val):
+    '''Convert numpy types to native Python types for psycopg2.'''
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if hasattr(val, 'item'):  # numpy scalar
+        return val.item()
+    return val
+
 def upsert(conn, table, cols, df):
     df = df[[c for c in cols if c in df.columns]].where(pd.notna(df), None)
-    rows = [tuple(row[c] if c in row else None for c in cols) for _, row in df.iterrows()]
+    rows = [tuple(to_python(row.get(c)) for c in cols) for _, row in df.iterrows()]
     sql  = f'''
         INSERT INTO {table} ({', '.join(cols)})
         VALUES %s
