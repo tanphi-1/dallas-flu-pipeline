@@ -245,9 +245,9 @@ dallas-flu-pipeline/
 
 ## Rubric Checklist (target 28/28 + 9 bonus)
 - [x] Problem description — 4 analytical questions, real gap documented
-- [ ] Cloud + IaC — Codespaces + Terraform (terraform apply must provision everything)
-- [ ] Batch orchestration — Kestra 3-flow DAG, uploads to data lake buckets
-- [ ] Data warehouse — Supabase PostgreSQL, composite indexes, explanation in README
+- [x] Cloud + IaC — Codespaces + Terraform (terraform apply provisions buckets, tables, Kestra)
+- [x] Batch orchestration — Kestra 3-flow DAG deployed, secrets injected, chain triggers set
+- [x] Data warehouse — Supabase PostgreSQL, composite indexes, 59+90 rows loaded
 - [ ] Transformations — dbt 5 models, schema tests + 2 custom SQL tests, docs screenshot
 - [ ] Dashboard — Power BI 4 charts (mix of temporal + categorical)
 - [ ] Reproducibility — README step-by-step, .env.example committed, scripts run in order
@@ -266,11 +266,32 @@ dallas-flu-pipeline/
 - [x] Schema confirmed against real PDFs
 - [x] Build guide v2 written (dallas_flu_build_guide_v2.docx)
 - [x] GitHub repo created (tanphi-1/dallas-flu-pipeline)
-- [ ] Folder structure committed to repo
-- [ ] Supabase project created
-- [ ] Terraform written and applied
-- [ ] Ingestion scripts written and tested
+- [x] Folder structure committed to repo
+- [x] Supabase project created (Asia region, session pooler)
+- [x] Terraform written and applied (buckets, tables, Kestra)
+- [x] Ingestion scripts written and tested
+  - Scrapers: curl subprocess (SSL fix), DSHS index crawling (handles inconsistent filenames)
+  - Parsers: content-based table finding, dynamic column extraction, season filtering
+  - DCHHS: 89 PDFs scraped → 59 rows loaded (30 wks 2023-24 + 29 wks 2024-25)
+  - DSHS: 105 PDFs scraped → 90 rows loaded (38 wks 2023-24 + 52 wks 2024-25)
+  - All key fields verified non-NULL: pct_positive, flu_hospitalizations, ili_pct, ili_baseline_pct
+  - Dashboard-format PDFs (2025-2026 season) filtered out by season date
+- [x] Kestra flows written and deployed
+  - Container running with `server local` command
+  - 3 flows deployed: scrape → parse+load → dbt (chained via ExecutionFlowCondition)
+  - 6 secrets injected as SECRET_* env vars
+  - Not yet end-to-end tested (depends on dbt models in Phase 6)
 - [ ] dbt models written and tested
-- [ ] Kestra flows written and tested
 - [ ] Power BI dashboard built
 - [ ] README written
+
+## Known Issues / Workarounds Applied
+1. Python requests/urllib3 SSL fails on DCHHS/DSHS sites → use curl subprocess
+2. DSHS URL patterns inconsistent across years → crawl index page instead of guessing URLs
+3. DCHHS table row labels shift between col[0] and col[1] across report periods → check first 3 cells
+4. DCHHS merged cells create variable column counts → filter to numeric values, use is_pct flag
+5. DSHS age group table has 25-col and 16-col layouts → extract non-empty values positionally
+6. DSHS ILI baseline value empty in table cells for most PDFs → fall back to text regex
+7. Supabase free plan no IPv4 direct connect → use session pooler
+8. Kestra open-source has no secrets API → pass as SECRET_* env vars on container
+9. numpy int64 causes psycopg2 "integer out of range" → to_python() converter
