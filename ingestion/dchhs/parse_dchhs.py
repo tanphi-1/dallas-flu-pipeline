@@ -46,33 +46,41 @@ def debug_pdf(filename):
         print(f'\n  Total tables (flat): {flat_idx}')
 
 def find_table(tables, marker):
-    '''Find table containing marker text in any row's first cell.'''
-    for i, tbl in enumerate(tables):
+    '''Find table containing marker text in any cell.'''
+    for tbl in tables:
         for row in tbl:
-            if row and row[0] and marker.lower() in str(row[0]).lower():
-                return tbl
+            for cell in row:
+                if cell and marker.lower() in str(cell).lower():
+                    return tbl
     return None
 
-def get_current_week_val(row):
+def row_label(row):
+    '''Get the label text from a row, checking col[0] then col[1].'''
+    for cell in row[:3]:  # check first 3 cells
+        if cell and str(cell).strip():
+            return str(cell).strip().lower()
+    return ''
+
+def get_current_week_val(row, is_pct=False):
     '''Extract current week value from a row with merged-cell gaps.
-    For count rows: season total is in the last column; current week is second-to-last value.
-    For percent rows: no season total; current week is the last value.'''
-    # Collect non-label, non-None, non-empty stripped values
-    vals = []
+    For count rows (is_pct=False): season total exists; current week is second-to-last numeric value.
+    For percent rows (is_pct=True): no season total; current week is the last numeric value.'''
+    # Collect only numeric-looking values (skip labels, empty strings)
+    nums = []
     for i, cell in enumerate(row):
-        if i == 0 or cell is None:
+        if cell is None:
             continue
-        s = str(cell).strip()
-        if s:
-            vals.append(s)
-    if not vals:
+        s = str(cell).strip().replace('*', '')
+        if not s:
+            continue
+        clean = s.replace(',', '').replace('%', '')
+        if re.match(r'^-?\d+\.?\d*$', clean):
+            nums.append(s)
+    if not nums:
         return None
-    # Check if the raw last column has a non-empty season total
-    last_raw = row[-1]
-    has_total = last_raw is not None and str(last_raw).strip() != ''
-    if has_total and len(vals) >= 2:
-        return vals[-2]   # second-to-last = current week
-    return vals[-1]       # last = current week (no season total)
+    if is_pct or len(nums) == 1:
+        return nums[-1]       # last numeric = current week
+    return nums[-2] if len(nums) >= 2 else nums[-1]  # second-to-last = current week
 
 def parse_date(text):
     '''Extract report week ending date from PDF text.'''
@@ -122,13 +130,13 @@ def extract_record(filename, pdf_bytes):
         if lab:
             try:
                 for row in lab:
-                    label = str(row[0] or '').lower()
+                    label = row_label(row)
                     if 'total influenza tests performed' in label:
                         rec['total_tests_performed'] = safe_int(get_current_week_val(row))
                     elif 'total positive influenza' in label:
                         rec['total_positive_tests'] = safe_int(get_current_week_val(row))
                     elif 'percent positive influenza' in label:
-                        rec['pct_positive'] = safe_float(get_current_week_val(row))
+                        rec['pct_positive'] = safe_float(get_current_week_val(row, is_pct=True))
                     elif 'positive influenza a' in label:
                         rec['flu_a_count'] = safe_int(get_current_week_val(row))
                     elif 'positive influenza b' in label:
@@ -143,7 +151,7 @@ def extract_record(filename, pdf_bytes):
         if hosp:
             try:
                 for row in hosp:
-                    label = str(row[0] or '').lower()
+                    label = row_label(row)
                     if 'influenza hospitalizations' in label:
                         rec['flu_hospitalizations'] = safe_int(get_current_week_val(row))
                     elif 'icu admissions' in label:

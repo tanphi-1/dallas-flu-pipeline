@@ -114,14 +114,21 @@ def extract_record(filename, pdf_bytes):
                             if v is not None:
                                 rec['ili_baseline_pct'] = v
                                 break
+                        # Fallback: extract from the label text itself (e.g. "baseline‡, 2023-2024")
+                        if rec.get('ili_baseline_pct') is None:
+                            # Try extracting from full text near "baseline"
+                            bm = re.search(r'baseline[^:]*?:\s*([\d.]+)%', text, re.IGNORECASE)
+                            if not bm:
+                                bm = re.search(r'baseline[^,]*,\s*\d{4}-\d{4}\s*\n?\s*([\d.]+)%', text, re.IGNORECASE)
+                            if bm:
+                                rec['ili_baseline_pct'] = safe_float(bm.group(1))
                     elif 'percentage' in label and 'ili' in label:
                         for cell in row[1:]:
                             v = safe_float(cell)
                             if v is not None:
                                 rec['ili_pct'] = v
                                 break
-                    elif 'providers reporting' == label.strip().rstrip('.') or \
-                         'number of providers reporting' == label.strip():
+                    elif 'providers reporting' in label and 'patient' not in label:
                         for cell in row[1:]:
                             v = safe_int(cell)
                             if v is not None:
@@ -140,28 +147,28 @@ def extract_record(filename, pdf_bytes):
             try:
                 # Last data row = current week
                 last_row = age_tbl[-1]
-                # Find column indices from header rows
-                # Standard layout: Week|Providers|0-4|5-24|25-49|50-64|65+|TotalILI|TotalPatients|%ILI
-                # But merged cells create gaps. Use the known column pattern.
-                # Collect all non-None values from last row
-                vals = [cell for cell in last_row]
-                # Try known column indices first (from debug: 1,4,7,9,12,15,18,21,24)
-                if len(vals) >= 25:
-                    rec['providers_reporting'] = rec.get('providers_reporting') or safe_int(vals[1])
-                    rec['age_0_4_ili']          = safe_int(vals[4])
-                    rec['age_5_24_ili']         = safe_int(vals[7])
-                    rec['age_25_49_ili']        = safe_int(vals[9])
-                    rec['age_50_64_ili']        = safe_int(vals[12])
-                    rec['age_65_plus_ili']      = safe_int(vals[15])
-                    rec['total_ili_cases']      = safe_int(vals[18])
-                    rec['total_patient_visits'] = safe_int(vals[21])
-                    ili_from_table = safe_float(vals[24])
+                # Extract all non-None, non-empty numeric values from the row
+                # Layout varies: 25+ cols (with gaps) or 16 cols (compact)
+                # Pattern is always: Week, Providers, 0-4, 5-24, 25-49, 50-64, 65+, TotalILI, TotalPatients, %ILI
+                nums = []
+                for cell in last_row:
+                    if cell is not None and str(cell).strip():
+                        nums.append(str(cell).strip())
+                # nums should be: [YYYYWW, providers, 0-4, 5-24, 25-49, 50-64, 65+, totalILI, totalPatients, %ILI]
+                if len(nums) >= 10:
+                    rec['providers_reporting'] = rec.get('providers_reporting') or safe_int(nums[1])
+                    rec['age_0_4_ili']          = safe_int(nums[2])
+                    rec['age_5_24_ili']         = safe_int(nums[3])
+                    rec['age_25_49_ili']        = safe_int(nums[4])
+                    rec['age_50_64_ili']        = safe_int(nums[5])
+                    rec['age_65_plus_ili']      = safe_int(nums[6])
+                    rec['total_ili_cases']      = safe_int(nums[7])
+                    rec['total_patient_visits'] = safe_int(nums[8])
+                    ili_from_table = safe_float(nums[9])
                     if ili_from_table is not None:
                         rec['ili_pct'] = rec.get('ili_pct') or ili_from_table
-                else:
-                    # Fallback: collect non-None numeric values
-                    nums = [cell for cell in vals if cell is not None and str(cell).strip()]
-                    errors.append(f'Age table has {len(vals)} cols, expected 25+. Got {len(nums)} values.')
+                elif len(nums) >= 3:
+                    errors.append(f'Age table row has only {len(nums)} values: {nums[:5]}...')
             except Exception as e:
                 errors.append(f'Age group table error: {e}')
         else:
