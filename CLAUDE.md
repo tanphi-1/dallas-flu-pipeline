@@ -249,7 +249,7 @@ dallas-flu-pipeline/
 - [x] Batch orchestration — Kestra 3-flow DAG deployed, secrets injected, chain triggers set
 - [x] Data warehouse — Supabase PostgreSQL, composite indexes, 59+90 rows loaded
 - [x] Transformations — dbt 5 models (2 staging + 1 intermediate + 2 marts), 9 tests passed, docs generated
-- [ ] Dashboard — Power BI 4 charts (mix of temporal + categorical)
+- [x] Dashboard — Power BI 4 charts (line, 100% stacked bar, clustered column, KPI cards + season slicer)
 - [ ] Reproducibility — README step-by-step, .env.example committed, scripts run in order
 - [ ] Peer reviews — review 3 classmates (+3 pts each = +9 bonus)
 
@@ -290,7 +290,15 @@ dallas-flu-pipeline/
   - Tests: 9/9 passed (7 schema: not_null, unique, accepted_values + 2 custom SQL: pct_in_range, no_future_dates)
   - Docs generated at dbt/target/ — screenshot pending for README
   - dbt creates schemas marts_staging and marts_marts (standard custom schema behavior)
-- [ ] Power BI dashboard built
+- [x] Power BI dashboard built
+  - Connected to Supabase via PostgreSQL connector (Trust Server Certificate=true for SSL)
+  - 4 charts from marts_marts schema:
+    - Chart 1: Weekly % Positive (line chart, season_week_num x-axis, flu_season legend)
+    - Chart 2: Strain Distribution (100% stacked bar, sum_flu_a vs sum_flu_b by season)
+    - Chart 3: Weekly Hospitalizations (clustered column, by season)
+    - Chart 4: Season Severity Scorecards (4 cards: severity_label, peak_pct_positive, weeks_above_baseline, dominant_strain)
+  - Season slicer on flu_season for interactive filtering
+  - Saved as dallas_flu_dashboard.pbix (local, not committed — binary file)
 - [ ] README written
 
 ## Known Issues / Workarounds Applied
