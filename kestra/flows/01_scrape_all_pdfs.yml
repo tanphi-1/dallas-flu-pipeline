@@ -10,16 +10,15 @@ triggers:
 tasks:
   - id: scrape_dchhs
     type: io.kestra.plugin.scripts.python.Script
-    env:
-      SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
-      SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     beforeCommands:
       - pip install supabase -q
     script: |
       import os, re, subprocess
       from supabase import create_client
 
-      supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+      supabase = create_client(os.environ['SECRET_SUPABASE_URL'], os.environ['SECRET_SUPABASE_KEY'])
       BUCKET   = 'flu-pdfs-dchhs'
       BASE_URL = 'https://www.dallascounty.org'
       INDEX_URL = BASE_URL + '/departments/dchhs/data-reports/influenza-surveillance.php'
@@ -53,7 +52,12 @@ tasks:
           return results
 
       existing = list_existing()
-      links = get_pdf_links()
+      try:
+          links = get_pdf_links()
+      except Exception as e:
+          print(f'WARNING: Could not fetch DCHHS index page: {e}')
+          print('Continuing with existing PDFs in bucket.')
+          links = []
       print(f'Found {len(links)} DCHHS PDF links')
       uploaded = 0
       for year, url in links:
@@ -74,16 +78,15 @@ tasks:
 
   - id: scrape_dshs
     type: io.kestra.plugin.scripts.python.Script
-    env:
-      SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
-      SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     beforeCommands:
       - pip install supabase -q
     script: |
       import os, re, subprocess
       from supabase import create_client
 
-      supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+      supabase = create_client(os.environ['SECRET_SUPABASE_URL'], os.environ['SECRET_SUPABASE_KEY'])
       BUCKET   = 'flu-pdfs-dshs'
       BASE     = 'https://www.dshs.texas.gov'
       INDEX    = BASE + '/texas-respiratory-virus-surveillance-report'

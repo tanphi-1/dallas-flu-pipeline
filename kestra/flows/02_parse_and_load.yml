@@ -10,14 +10,13 @@ triggers:
         namespace: dallas.flu
         flowId: scrape_all_pdfs
       - type: io.kestra.plugin.core.condition.ExecutionStatusCondition
-        in: [SUCCESS]
+        in: [SUCCESS, WARNING]
 
 tasks:
   - id: parse_dchhs
     type: io.kestra.plugin.scripts.python.Script
-    env:
-      SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
-      SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     beforeCommands:
       - pip install pdfplumber pandas supabase -q
     outputFiles: ['dchhs_weekly.csv']
@@ -27,7 +26,7 @@ tasks:
       from datetime import datetime
       from supabase import create_client
 
-      supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+      supabase = create_client(os.environ['SECRET_SUPABASE_URL'], os.environ['SECRET_SUPABASE_KEY'])
       BUCKET = 'flu-pdfs-dchhs'
       TARGET_SEASONS = {'2023-2024', '2024-2025'}
 
@@ -167,9 +166,8 @@ tasks:
 
   - id: parse_dshs
     type: io.kestra.plugin.scripts.python.Script
-    env:
-      SUPABASE_URL: '{{ secret("SUPABASE_URL") }}'
-      SUPABASE_KEY: '{{ secret("SUPABASE_KEY") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     beforeCommands:
       - pip install pdfplumber pandas supabase -q
     outputFiles: ['dshs_weekly.csv']
@@ -179,7 +177,7 @@ tasks:
       from datetime import datetime, date, timedelta
       from supabase import create_client
 
-      supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+      supabase = create_client(os.environ['SECRET_SUPABASE_URL'], os.environ['SECRET_SUPABASE_KEY'])
       BUCKET = 'flu-pdfs-dshs'
       TARGET_SEASONS = {'2023-2024', '2024-2025'}
 
@@ -346,8 +344,8 @@ tasks:
 
   - id: load_to_staging
     type: io.kestra.plugin.scripts.python.Script
-    env:
-      SUPABASE_DB_URL: '{{ secret("SUPABASE_DB_URL") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     inputFiles:
       dchhs_weekly.csv: '{{ outputs.parse_dchhs.outputFiles["dchhs_weekly.csv"] }}'
       dshs_weekly.csv: '{{ outputs.parse_dshs.outputFiles["dshs_weekly.csv"] }}'
@@ -357,7 +355,7 @@ tasks:
       import os, pandas as pd, psycopg2
       from psycopg2.extras import execute_values
 
-      DB_URL = os.environ['SUPABASE_DB_URL']
+      DB_URL = os.environ['SECRET_SUPABASE_DB_URL']
 
       DCHHS_COLS = [
           'report_week_end_date','mmwr_week','flu_season',

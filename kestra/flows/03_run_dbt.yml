@@ -10,28 +10,30 @@ triggers:
         namespace: dallas.flu
         flowId: parse_and_load
       - type: io.kestra.plugin.core.condition.ExecutionStatusCondition
-        in: [SUCCESS]
+        in: [SUCCESS, WARNING]
 
 tasks:
   - id: dbt_run
     type: io.kestra.plugin.scripts.shell.Commands
-    env:
-      SUPABASE_DB_URL: '{{ secret("SUPABASE_DB_URL") }}'
-      SUPABASE_DB_HOST: '{{ secret("SUPABASE_DB_HOST") }}'
-      SUPABASE_DB_PASSWORD: '{{ secret("SUPABASE_DB_PASSWORD") }}'
-      SUPABASE_PROJECT_REF: '{{ secret("SUPABASE_PROJECT_REF") }}'
-    beforeCommands:
-      - pip install dbt-core dbt-postgres -q
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     commands:
-      - git clone https://github.com/tanphi-1/dallas-flu-pipeline.git /tmp/repo
-      - cd /tmp/repo/dbt && dbt run --profiles-dir . --project-dir .
+      - export PATH=$PATH:/home/kestra/.local/bin
+      - export SUPABASE_DB_URL=$SECRET_SUPABASE_DB_URL
+      - export SUPABASE_DB_HOST=$SECRET_SUPABASE_DB_HOST
+      - export SUPABASE_DB_PASSWORD=$SECRET_SUPABASE_DB_PASSWORD
+      - export SUPABASE_PROJECT_REF=$SECRET_SUPABASE_PROJECT_REF
+      - pip install dbt-core dbt-postgres -q
+      - cd /tmp/dbt && dbt run --profiles-dir . --project-dir .
 
   - id: dbt_test
     type: io.kestra.plugin.scripts.shell.Commands
-    env:
-      SUPABASE_DB_URL: '{{ secret("SUPABASE_DB_URL") }}'
-      SUPABASE_DB_HOST: '{{ secret("SUPABASE_DB_HOST") }}'
-      SUPABASE_DB_PASSWORD: '{{ secret("SUPABASE_DB_PASSWORD") }}'
-      SUPABASE_PROJECT_REF: '{{ secret("SUPABASE_PROJECT_REF") }}'
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
     commands:
-      - cd /tmp/repo/dbt && dbt test --profiles-dir . --project-dir .
+      - export PATH=$PATH:/home/kestra/.local/bin
+      - export SUPABASE_DB_URL=$SECRET_SUPABASE_DB_URL
+      - export SUPABASE_DB_HOST=$SECRET_SUPABASE_DB_HOST
+      - export SUPABASE_DB_PASSWORD=$SECRET_SUPABASE_DB_PASSWORD
+      - export SUPABASE_PROJECT_REF=$SECRET_SUPABASE_PROJECT_REF
+      - cd /tmp/dbt && dbt test --profiles-dir . --project-dir .
