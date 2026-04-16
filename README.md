@@ -72,6 +72,31 @@ IaC: Terraform (Supabase buckets, staging tables, Kestra container)
 - 2024-2025: MMWR Week 40/2024 through Week 20/2025
 - ~120 PDFs total across both sources and seasons
 
+## Data Warehouse
+
+The warehouse uses Supabase PostgreSQL with two schemas:
+
+- **`staging`** — raw extracted data (`stg_dchhs_weekly`, `stg_dshs_weekly`)
+- **`marts`** — transformed tables for dashboards (`mart_flu_weekly`, `mart_flu_seasonal_summary`)
+
+### Indexing strategy
+
+Both staging tables have a composite index on `(flu_season, mmwr_week)`:
+
+```sql
+CREATE INDEX idx_dchhs_season_week ON staging.stg_dchhs_weekly (flu_season, mmwr_week);
+CREATE INDEX idx_dshs_season_week  ON staging.stg_dshs_weekly  (flu_season, mmwr_week);
+```
+
+**Why this index:** Every downstream query — dbt models, Power BI charts, and the season slicer — filters by `flu_season` first, then orders or groups by `mmwr_week`. This composite index covers both the filter and sort in a single index scan. For example:
+
+- **Chart 1** (% Positive by Week): filters `WHERE flu_season = '2023-2024'`, orders by week
+- **Chart 3** (Weekly Hospitalizations): same filter + sort pattern
+- **Season slicer**: filters all charts by `flu_season`
+- **dbt window functions** (`ROW_NUMBER`, `LAG`, rolling avg): partition by `flu_season`, order by `mmwr_week`
+
+Both staging tables also have a `UNIQUE` constraint on `report_week_end_date`, which supports the upsert logic (`ON CONFLICT DO UPDATE`) and the dbt JOIN between DCHHS and DSHS data.
+
 ## Dashboard
 
 The Power BI dashboard connects to the `marts` schema and includes:
