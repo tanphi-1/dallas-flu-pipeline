@@ -24,7 +24,9 @@ tasks:
       - export SUPABASE_DB_PASSWORD=$SECRET_SUPABASE_DB_PASSWORD
       - export SUPABASE_PROJECT_REF=$SECRET_SUPABASE_PROJECT_REF
       - pip install dbt-core dbt-postgres -q
-      - cd /tmp/dbt && dbt run --profiles-dir . --project-dir .
+      - rm -rf /tmp/dallas-flu-pipeline-main
+      - curl -sL https://github.com/tanphi-1/dallas-flu-pipeline/archive/refs/heads/main.tar.gz | tar xz -C /tmp
+      - cd /tmp/dallas-flu-pipeline-main/dbt && dbt run --profiles-dir . --project-dir .
 
   - id: dbt_test
     type: io.kestra.plugin.scripts.shell.Commands
@@ -36,4 +38,4 @@ tasks:
       - export SUPABASE_DB_HOST=$SECRET_SUPABASE_DB_HOST
       - export SUPABASE_DB_PASSWORD=$SECRET_SUPABASE_DB_PASSWORD
       - export SUPABASE_PROJECT_REF=$SECRET_SUPABASE_PROJECT_REF
-      - cd /tmp/dbt && dbt test --profiles-dir . --project-dir .
+      - cd /tmp/dallas-flu-pipeline-main/dbt && dbt test --profiles-dir . --project-dir .
