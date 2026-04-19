@@ -9,3 +9,5 @@ __pycache__/
 dbt/target/
 dbt/logs/
 dbt/profiles.yml
+CLAUDE.md
+dallas_flu_build_guide_v2.docx
